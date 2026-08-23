@@ -1,7 +1,7 @@
 export default function BackToPortfolio() {
   function handleBack(e: React.MouseEvent<HTMLAnchorElement>) {
     e.preventDefault();
-    const url = 'https://bganguly.github.io/#serverless';
+    const url = 'https://bganguly.github.io/#event_pipeline';
     try {
       if (window.opener && !window.opener.closed) {
         window.opener.location.href = url;
@@ -13,7 +13,7 @@ export default function BackToPortfolio() {
   }
   return (
     <a
-      href="https://bganguly.github.io/#serverless"
+      href="https://bganguly.github.io/#event_pipeline"
       onClick={handleBack}
       style={{
         position: 'fixed',
