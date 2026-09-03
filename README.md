@@ -2,7 +2,7 @@
 
 Serverless event-driven job pipeline: a React UI posts jobs to **API Gateway**; a `createJob` Lambda writes the record to **DynamoDB** and publishes to **SNS**, which fans out to **SQS**; a `processJob` Lambda consumes the queue and transitions the job `PENDING → PROCESSING → COMPLETED`. The entire backend deploys in one command via the **Serverless Framework** — no infrastructure provisioning required.
 
-**[→ Portfolio demo](https://bganguly.github.io/?open=serverless)**
+**[→ Portfolio demo](https://bganguly.github.io/#event_pipeline)**
 
 ---
 
