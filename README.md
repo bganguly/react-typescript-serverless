@@ -24,21 +24,6 @@ Serverless event-driven job pipeline: a React UI posts jobs to **API Gateway**; 
 
 ---
 
-## Stack
-
-| Component | Implementation |
-|---|---|
-| **Frontend** | React 18 + TypeScript + Vite; polls `GET /jobs/{id}` until terminal state; `VITE_API_BASE_URL` injected via `.env.local` |
-| **API** | AWS API Gateway HTTP API — `POST /jobs`, `GET /jobs/{jobId}` |
-| **createJob Lambda** | Node.js 24; writes `PENDING` record to DynamoDB, publishes SNS event; IAM-scoped to the created table and topic |
-| **SNS → SQS fan-out** | SNS topic → SQS standard queue + dead-letter queue; decouples publish from processing |
-| **processJob Lambda** | SQS event source mapping; updates DynamoDB `PROCESSING` → simulates work → `COMPLETED` |
-| **Job store** | DynamoDB `jobs` table; keyed on `jobId` (UUID); `status` attribute drives UI state machine |
-| **IaC** | Serverless Framework `serverless.yml` — API Gateway, Lambdas, SNS, SQS, DynamoDB, IAM roles, CloudWatch logs |
-| **Deploy** | `npm run deploy` (root) → `npx sls deploy` in `backend/` — packages and deploys the full stack, prints `HttpApiUrl` |
-
----
-
 ## Architecture
 
 ### Job submission flow — step by step
@@ -90,10 +75,18 @@ sequenceDiagram
 
 ---
 
-## Screenshots
+## Stack
 
-![Job Completed Screen](assets/images/screenshot-2.png)
-![Home Screen](assets/images/screenshot-1.png)
+| Component | Implementation |
+|---|---|
+| **Frontend** | React 18 + TypeScript + Vite; polls `GET /jobs/{id}` until terminal state; `VITE_API_BASE_URL` injected via `.env.local` |
+| **API** | AWS API Gateway HTTP API — `POST /jobs`, `GET /jobs/{jobId}` |
+| **createJob Lambda** | Node.js 24; writes `PENDING` record to DynamoDB, publishes SNS event; IAM-scoped to the created table and topic |
+| **SNS → SQS fan-out** | SNS topic → SQS standard queue + dead-letter queue; decouples publish from processing |
+| **processJob Lambda** | SQS event source mapping; updates DynamoDB `PROCESSING` → simulates work → `COMPLETED` |
+| **Job store** | DynamoDB `jobs` table; keyed on `jobId` (UUID); `status` attribute drives UI state machine |
+| **IaC** | Serverless Framework `serverless.yml` — API Gateway, Lambdas, SNS, SQS, DynamoDB, IAM roles, CloudWatch logs |
+| **Deploy** | `npm run deploy` (root) → `npx sls deploy` in `backend/` — packages and deploys the full stack, prints `HttpApiUrl` |
 
 ---
 
@@ -160,4 +153,11 @@ Set `VITE_API_BASE_URL` in `frontend/.env.local` to the `HttpApiUrl` printed by 
 npm run remove
 STAGE=dev REGION=us-east-1 npm run remove
 ```
+
+## Screenshots
+
+![Job Completed Screen](assets/images/screenshot-2.png)
+![Home Screen](assets/images/screenshot-1.png)
+
+---
 
