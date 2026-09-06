@@ -24,6 +24,8 @@ Serverless event-driven job pipeline: a React UI posts jobs to **API Gateway**; 
 
 ---
 
+## Stack
+
 | Component | Implementation |
 |---|---|
 | **Frontend** | React 18 + TypeScript + Vite; polls `GET /jobs/{id}` until terminal state; `VITE_API_BASE_URL` injected via `.env.local` |
@@ -95,7 +97,7 @@ sequenceDiagram
 
 ---
 
-## Running
+## Deployment / Running
 
 ```bash
 npm run deploy          # deploy backend (sls deploy) + print HttpApiUrl
