@@ -159,7 +159,3 @@ npm run remove
 STAGE=dev REGION=us-east-1 npm run remove
 ```
 
-## Folder layout
-
-- `backend`: Serverless + Lambda + AWS resources
-- `frontend`: React + TypeScript (Vite)
