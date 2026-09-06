@@ -37,13 +37,6 @@ Serverless event-driven job pipeline: a React UI posts jobs to **API Gateway**; 
 
 ---
 
-## Screenshots
-
-![Job Completed Screen](assets/images/screenshot-2.png)
-![Home Screen](assets/images/screenshot-1.png)
-
----
-
 ## Architecture
 
 ### Job submission flow — step by step
@@ -92,6 +85,13 @@ sequenceDiagram
 | **Node.js 24 pinning** | `engines` + `engine-strict` in `package.json` prevent silent version drift — `npm install` fails if the wrong Node version is active |
 | **Plain Lambda handlers** | No Express/Nest wrapper — keeps cold starts minimal and the handler surface area small for a demo-scale workload |
 | **CORS** | Open (`*`) for demo convenience; restrict origins to the CloudFront/S3 domain before production use |
+
+---
+
+## Screenshots
+
+![Job Completed Screen](assets/images/screenshot-2.png)
+![Home Screen](assets/images/screenshot-1.png)
 
 ---
 
