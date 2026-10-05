@@ -80,8 +80,14 @@ else
 EOF
   OAC_ID="$(aws cloudfront create-origin-access-control \
     --origin-access-control-config "file://${OAC_CONFIG_FILE}" \
-    --query 'OriginAccessControl.Id' --output text)"
+    --query 'OriginAccessControl.Id' --output text 2>/dev/null)" || true
   rm -f "${OAC_CONFIG_FILE}"
+  if [[ -z "${OAC_ID}" || "${OAC_ID}" == "None" ]]; then
+    echo "OAC already exists — looking up existing ID..."
+    OAC_ID="$(aws cloudfront list-origin-access-controls \
+      --query "OriginAccessControlList.Items[?Name=='react-lambda-streaming-${STAGE}-oac'].Id | [0]" \
+      --output text)"
+  fi
 
   echo "Creating CloudFront distribution..."
   DIST_CONFIG_FILE="$(mktemp)"
@@ -119,15 +125,27 @@ EOF
 }
 EOF
   DIST_JSON="$(aws cloudfront create-distribution \
-    --distribution-config "file://${DIST_CONFIG_FILE}")"
+    --distribution-config "file://${DIST_CONFIG_FILE}" 2>/dev/null)" || true
   rm -f "${DIST_CONFIG_FILE}"
 
-  eval "$(echo "${DIST_JSON}" | python3 -c "
+  if [[ -n "${DIST_JSON}" ]]; then
+    eval "$(echo "${DIST_JSON}" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)['Distribution']
 print('DISTRIBUTION_ID=' + d['Id'])
 print('DOMAIN=' + d['DomainName'])
 ")"
+  else
+    echo "Distribution already exists — looking up existing distribution..."
+    eval "$(aws cloudfront list-distributions --query \
+      "DistributionList.Items[?Comment=='react-lambda-streaming-${STAGE} frontend'] | [0].{Id:Id,DomainName:DomainName}" \
+      --output json | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print('DISTRIBUTION_ID=' + d['Id'])
+print('DOMAIN=' + d['DomainName'])
+")"
+  fi
 
   printf 'DISTRIBUTION_ID=%s\nDOMAIN=%s\nOAC_ID=%s\n' \
     "${DISTRIBUTION_ID}" "${DOMAIN}" "${OAC_ID}" > "${CF_STATE}"
