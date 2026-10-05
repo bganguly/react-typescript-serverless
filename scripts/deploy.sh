@@ -174,6 +174,7 @@ EOF
 fi
 
 echo "Building frontend..."
+[[ -d "${ROOT_DIR}/frontend/node_modules" ]] || npm --prefix "${ROOT_DIR}/frontend" install
 VITE_API_BASE_URL="${API_URL}" npm --prefix "${ROOT_DIR}/frontend" run build
 
 {
