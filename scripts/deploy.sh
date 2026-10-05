@@ -8,66 +8,85 @@ BACKEND_DIR="${ROOT_DIR}/backend"
 CF_STATE="${ROOT_DIR}/.cf-state"
 BUCKET_NAME="react-lambda-streaming-sample-${STAGE}-site"
 
-echo "[1/3] Checking AWS credentials..."
-aws sts get-caller-identity >/dev/null 2>&1 \
-  || { echo "  Run: aws configure"; exit 1; }
-echo "  Credentials valid."
-ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+ACCOUNT_ID=""
+API_URL=""
+DISTRIBUTION_ID=""
+DOMAIN=""
+OAC_ID=""
 
-_GH_REPO="$(git -C "${ROOT_DIR}" remote get-url origin 2>/dev/null \
-  | sed 's|.*github\.com[:/]\(.*\)\.git$|\1|; s|.*github\.com[:/]\(.*\)$|\1|')"
-if command -v gh >/dev/null 2>&1 && [[ -n "${_GH_REPO}" ]]; then
-  printf '  Syncing AWS credentials to GitHub Actions secrets (%s)...\n' "${_GH_REPO}"
-  aws configure get aws_access_key_id     | gh secret set AWS_ACCESS_KEY_ID     --repo "${_GH_REPO}"
-  aws configure get aws_secret_access_key | gh secret set AWS_SECRET_ACCESS_KEY --repo "${_GH_REPO}"
+# ── Credentials ───────────────────────────────────────────────────────────────
+
+_check_credentials() {
+  echo "[1/3] Checking AWS credentials..."
+  aws sts get-caller-identity >/dev/null 2>&1 \
+    || { echo "  Run: aws configure"; exit 1; }
+  echo "  Credentials valid."
+  ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+
+  local _GH_REPO
+  _GH_REPO="$(git -C "${ROOT_DIR}" remote get-url origin 2>/dev/null \
+    | sed 's|.*github\.com[:/]\(.*\)\.git$|\1|; s|.*github\.com[:/]\(.*\)$|\1|')"
+  if command -v gh >/dev/null 2>&1 && [[ -n "${_GH_REPO}" ]]; then
+    printf '  Syncing AWS credentials to GitHub Actions secrets (%s)...\n' "${_GH_REPO}"
+    aws configure get aws_access_key_id     | gh secret set AWS_ACCESS_KEY_ID     --repo "${_GH_REPO}"
+    aws configure get aws_secret_access_key | gh secret set AWS_SECRET_ACCESS_KEY --repo "${_GH_REPO}"
+    if [[ -f "${CF_STATE}" ]]; then
+      source "${CF_STATE}"
+      printf '%s' "${DISTRIBUTION_ID}" | gh secret set CF_DISTRIBUTION_ID --repo "${_GH_REPO}"
+    fi
+  fi
+}
+
+# ── Backend ───────────────────────────────────────────────────────────────────
+
+_deploy_backend() {
+  echo ""
+  echo "[2/3] Deploying backend..."
+  cd "${BACKEND_DIR}"
+  [[ -d node_modules ]] || npm install
+  npx sls deploy --stage "${STAGE}" --region "${REGION}"
+
+  local INFO_OUTPUT
+  INFO_OUTPUT="$(npx sls info --verbose --stage "${STAGE}" --region "${REGION}" 2>&1)"
+
+  API_URL="$(printf '%s\n' "${INFO_OUTPUT}" | grep -E 'HttpApiUrl:' | tail -n 1 | sed -E 's/.*HttpApiUrl:[[:space:]]*//')"
+  if [[ -z "${API_URL}" ]]; then
+    API_URL="$(printf '%s\n' "${INFO_OUTPUT}" | grep -E 'POST - https?://' | head -n 1 \
+      | sed -E 's/.*POST - (https?:\/\/[^ ]+).*/\1/' | sed -E 's#/jobs(/.*)?$##')"
+  fi
+  API_URL="${API_URL//amazonaws.comamazonaws.com/amazonaws.com}"
+  [[ -n "${API_URL}" ]] || { echo "Could not resolve HttpApiUrl."; exit 1; }
+  echo "  HttpApiUrl: ${API_URL}"
+}
+
+# ── Frontend: S3 bucket ───────────────────────────────────────────────────────
+
+_ensure_s3_bucket() {
+  if ! aws s3api head-bucket --bucket "${BUCKET_NAME}" 2>/dev/null; then
+    echo "Creating S3 bucket: ${BUCKET_NAME}"
+    if [[ "${REGION}" == "us-east-1" ]]; then
+      aws s3api create-bucket --bucket "${BUCKET_NAME}" --region "${REGION}"
+    else
+      aws s3api create-bucket --bucket "${BUCKET_NAME}" --region "${REGION}" \
+        --create-bucket-configuration LocationConstraint="${REGION}"
+    fi
+    aws s3api put-public-access-block --bucket "${BUCKET_NAME}" \
+      --public-access-block-configuration \
+      "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
+  fi
+}
+
+# ── Frontend: CloudFront ──────────────────────────────────────────────────────
+
+_ensure_cloudfront() {
   if [[ -f "${CF_STATE}" ]]; then
     source "${CF_STATE}"
-    printf '%s' "${DISTRIBUTION_ID}" | gh secret set CF_DISTRIBUTION_ID --repo "${_GH_REPO}"
+    echo "Using existing CloudFront distribution: ${DISTRIBUTION_ID}"
+    return
   fi
-fi
 
-# ── Backend: Serverless deploy ────────────────────────────────────────────────
-echo ""
-echo "[2/3] Deploying backend..."
-cd "${BACKEND_DIR}"
-[[ -d node_modules ]] || npm install
-npx sls deploy --stage "${STAGE}" --region "${REGION}"
-
-INFO_OUTPUT="$(npx sls info --verbose --stage "${STAGE}" --region "${REGION}" 2>&1)"
-
-API_URL="$(printf '%s\n' "${INFO_OUTPUT}" | grep -E 'HttpApiUrl:' | tail -n 1 | sed -E 's/.*HttpApiUrl:[[:space:]]*//')"
-if [[ -z "${API_URL}" ]]; then
-  API_URL="$(printf '%s\n' "${INFO_OUTPUT}" | grep -E 'POST - https?://' | head -n 1 \
-    | sed -E 's/.*POST - (https?:\/\/[^ ]+).*/\1/' | sed -E 's#/jobs(/.*)?$##')"
-fi
-API_URL="${API_URL//amazonaws.comamazonaws.com/amazonaws.com}"
-[[ -n "${API_URL}" ]] || { echo "Could not resolve HttpApiUrl."; exit 1; }
-echo "  HttpApiUrl: ${API_URL}"
-
-# ── Frontend: S3 + CloudFront ─────────────────────────────────────────────────
-echo ""
-echo "[3/3] Deploying frontend..."
-cd "${ROOT_DIR}"
-
-if ! aws s3api head-bucket --bucket "${BUCKET_NAME}" 2>/dev/null; then
-  echo "Creating S3 bucket: ${BUCKET_NAME}"
-  if [[ "${REGION}" == "us-east-1" ]]; then
-    aws s3api create-bucket --bucket "${BUCKET_NAME}" --region "${REGION}"
-  else
-    aws s3api create-bucket --bucket "${BUCKET_NAME}" --region "${REGION}" \
-      --create-bucket-configuration LocationConstraint="${REGION}"
-  fi
-  aws s3api put-public-access-block --bucket "${BUCKET_NAME}" \
-    --public-access-block-configuration \
-    "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
-fi
-
-if [[ -f "${CF_STATE}" ]]; then
-  # shellcheck source=/dev/null
-  source "${CF_STATE}"
-  echo "Using existing CloudFront distribution: ${DISTRIBUTION_ID}"
-else
   echo "Creating CloudFront OAC..."
+  local OAC_CONFIG_FILE
   OAC_CONFIG_FILE="$(mktemp)"
   cat > "${OAC_CONFIG_FILE}" <<EOF
 {
@@ -90,6 +109,7 @@ EOF
   fi
 
   echo "Creating CloudFront distribution..."
+  local DIST_CONFIG_FILE
   DIST_CONFIG_FILE="$(mktemp)"
   cat > "${DIST_CONFIG_FILE}" <<EOF
 {
@@ -124,6 +144,7 @@ EOF
   "HttpVersion": "http2"
 }
 EOF
+  local DIST_JSON
   DIST_JSON="$(aws cloudfront create-distribution \
     --distribution-config "file://${DIST_CONFIG_FILE}" 2>/dev/null)" || true
   rm -f "${DIST_CONFIG_FILE}"
@@ -150,6 +171,7 @@ print('DOMAIN=' + d['DomainName'])
   printf 'DISTRIBUTION_ID=%s\nDOMAIN=%s\nOAC_ID=%s\n' \
     "${DISTRIBUTION_ID}" "${DOMAIN}" "${OAC_ID}" > "${CF_STATE}"
 
+  local BUCKET_POLICY_FILE
   BUCKET_POLICY_FILE="$(mktemp)"
   cat > "${BUCKET_POLICY_FILE}" <<EOF
 {
@@ -171,27 +193,43 @@ EOF
   aws s3api put-bucket-policy --bucket "${BUCKET_NAME}" --policy "file://${BUCKET_POLICY_FILE}"
   rm -f "${BUCKET_POLICY_FILE}"
   echo "CloudFront distribution created: ${DISTRIBUTION_ID}"
-fi
+}
 
-echo "Building frontend..."
-[[ -d "${ROOT_DIR}/frontend/node_modules" ]] || npm --prefix "${ROOT_DIR}/frontend" install
-VITE_API_BASE_URL="${API_URL}" npm --prefix "${ROOT_DIR}/frontend" run build
+# ── Frontend: build + sync ────────────────────────────────────────────────────
 
-{
-  printf '<script>window._apiBase = "%s";</script>\n' "${API_URL}"
-  cat "${ROOT_DIR}/api-explorer.html"
-} > "${ROOT_DIR}/frontend/dist/api-explorer.html"
+_deploy_frontend() {
+  echo ""
+  echo "[3/3] Deploying frontend..."
+  cd "${ROOT_DIR}"
 
-echo "Syncing to S3..."
-aws s3 sync "${ROOT_DIR}/frontend/dist/" "s3://${BUCKET_NAME}/" --delete
+  _ensure_s3_bucket
+  _ensure_cloudfront
 
-echo "Invalidating CloudFront cache..."
-aws cloudfront create-invalidation \
-  --distribution-id "${DISTRIBUTION_ID}" \
-  --paths "/*" --query 'Invalidation.Id' --output text
+  echo "Building frontend..."
+  [[ -d "${ROOT_DIR}/frontend/node_modules" ]] || npm --prefix "${ROOT_DIR}/frontend" install
+  VITE_API_BASE_URL="${API_URL}" npm --prefix "${ROOT_DIR}/frontend" run build
 
+  {
+    printf '<script>window._apiBase = "%s";</script>\n' "${API_URL}"
+    cat "${ROOT_DIR}/api-explorer.html"
+  } > "${ROOT_DIR}/frontend/dist/api-explorer.html"
 
-echo ""
-echo "[deploy] Done."
-echo "  API:      ${API_URL}"
-echo "  Frontend: https://${DOMAIN}"
+  echo "Syncing to S3..."
+  aws s3 sync "${ROOT_DIR}/frontend/dist/" "s3://${BUCKET_NAME}/" --delete
+
+  echo "Invalidating CloudFront cache..."
+  aws cloudfront create-invalidation \
+    --distribution-id "${DISTRIBUTION_ID}" \
+    --paths "/*" --query 'Invalidation.Id' --output text
+
+  echo ""
+  echo "[deploy] Done."
+  echo "  API:      ${API_URL}"
+  echo "  Frontend: https://${DOMAIN}"
+}
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+
+_check_credentials
+_deploy_backend
+_deploy_frontend
